@@ -215,12 +215,16 @@ def show(design: dict, path: str, nets: bool = False) -> str:
         idef = defs[d["impl"]]
         out.append("impl %s (%s:%s)" % (d["impl"], idef.get("src", {}).get("file"), idef.get("src", {}).get("line")))
     params = dict(d.get("params", {}))
-    for k, v in (inst.get("params", {}) if inst else {}).items():
+    overrides = inst.get("params", {}) if inst else {}
+    for k, v in overrides.items():
         for dk in [x for x in params if x.lower() == k.lower()]:
             params.pop(dk)
         params[k] = v
     if params:
-        out.append("params " + " ".join("%s=%s" % kv for kv in list(params.items())[:24]))
+        override_names = {k.lower() for k in overrides}
+        items = sorted(params.items(), key=lambda kv: kv[0].lower() not in override_names)
+        more = " +%d more" % (len(items) - 24) if len(items) > 24 else ""
+        out.append("params " + " ".join("%s=%s" % kv for kv in items[:24]) + more)
     out.append("pins")
     for p in d["pins"]:
         line = "  " + _pin_desc(p)
