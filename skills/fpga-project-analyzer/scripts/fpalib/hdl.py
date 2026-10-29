@@ -1134,7 +1134,7 @@ def build_defs(design: dict, modules: list, rel=lambda p: p):
                                    range=p.get("range") or None, bus=p.get("bus"),
                                    pol=resets.get(pn) if pn in resets else None))
         if m.params:
-            d["params"] = {k: v for k, v in list(m.params.items())[:24]}
+            d["params"] = dict(m.params)
         sig = {}  # signal -> list of ends
 
         def touch(s, end):
