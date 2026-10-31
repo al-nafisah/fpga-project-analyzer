@@ -1564,6 +1564,28 @@ def _h_actuals(inst, callee, env):
     return out
 
 
+def _h_display_params(inst, callee, actuals):
+    """Instance parameter overrides for display, evaluating known VHDL actuals."""
+    raw = inst.get("params") or {}
+    if callee is None or callee.lang != "vhdl" or not raw:
+        return raw
+    names = [name for name, _ in callee.generics]
+    by_lower = {name.lower(): name for name in names}
+    out = {}
+    for key, text in raw.items():
+        if key.startswith("#") and key[1:].isdigit():
+            index = int(key[1:])
+            formal = names[index] if index < len(names) else None
+        else:
+            formal = by_lower.get(key.lower())
+        if formal is None:
+            out[key] = text
+            continue
+        value = actuals.get(formal.lower())
+        out[formal] = text if value is None else value
+    return out
+
+
 # ----------------------------------------------------------------------------
 # modules -> design defs
 
@@ -1634,18 +1656,24 @@ def build_defs(design: dict, modules: list, rel=lambda p: p):
         keep = lambda x: x.get("gen") is None or x["gen"] in active
         insts = [x for x in m.insts if keep(x)]
         kids = []
+        display_insts = []
         for inst in insts:
             c = callee_of(inst)
             sc = _h_scope(m, inst.get("gen"), env, bind) if env is not None else None
-            kids.append(elab(c, _h_actuals(inst, c, sc), depth + 1) if c else None)
+            actuals = _h_actuals(inst, c, sc) if c else {}
+            display = dict(inst)
+            display["params"] = _h_display_params(inst, c, actuals)
+            display_insts.append(display)
+            kids.append(elab(c, actuals, depth + 1) if c else None)
         procs = [x for x in m.procs if keep(x)]
         assigns = [x for x in m.assigns if keep(x)]
-        sig = (mkey, tuple(map(id, insts)), tuple(map(id, procs)), tuple(map(id, assigns)), tuple(kids))
+        shown_params = tuple(tuple(sorted((x.get("params") or {}).items())) for x in display_insts)
+        sig = (mkey, tuple(map(id, insts)), shown_params, tuple(map(id, procs)), tuple(map(id, assigns)), tuple(kids))
         did = sigs.get(sig)
         if did is None:
             vs = variants.setdefault(mkey, [])
             did = ids[mkey] if not vs else "%s~%d" % (ids[mkey], len(vs) + 1)
-            vs.append((did, insts, kids, procs, assigns))
+            vs.append((did, display_insts, kids, procs, assigns))
             sigs[sig] = did
         busy.discard(esig)
         memo[esig] = did
