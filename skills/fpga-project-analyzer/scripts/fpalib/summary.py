@@ -216,10 +216,14 @@ def show(design: dict, path: str, nets: bool = False) -> str:
         out.append("impl %s (%s:%s)" % (d["impl"], idef.get("src", {}).get("file"), idef.get("src", {}).get("line")))
     params = dict(d.get("params", {}))
     overrides = inst.get("params", {}) if inst else {}
+    pvals = inst.get("pvals", {}) if inst else {}
     for k, v in overrides.items():
         for dk in [x for x in params if x.lower() == k.lower()]:
             params.pop(dk)
-        params[k] = v
+        val = pvals.get(k, v)
+        if isinstance(val, bool):  # evaluated VHDL boolean: keep the source language's literals
+            val = "true" if val else "false"
+        params[k] = val
     if params:
         override_names = {k.lower() for k in overrides}
         items = sorted(params.items(), key=lambda kv: kv[0].lower() not in override_names)

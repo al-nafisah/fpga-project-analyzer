@@ -1634,10 +1634,13 @@ def build_defs(design: dict, modules: list, rel=lambda p: p):
         keep = lambda x: x.get("gen") is None or x["gen"] in active
         insts = [x for x in m.insts if keep(x)]
         kids = []
+        pvals = []
         for inst in insts:
             c = callee_of(inst)
             sc = _h_scope(m, inst.get("gen"), env, bind) if env is not None else None
-            kids.append(elab(c, _h_actuals(inst, c, sc), depth + 1) if c else None)
+            av = _h_actuals(inst, c, sc) if c else None
+            pvals.append(av)
+            kids.append(elab(c, av, depth + 1) if c else None)
         procs = [x for x in m.procs if keep(x)]
         assigns = [x for x in m.assigns if keep(x)]
         sig = (mkey, tuple(map(id, insts)), tuple(map(id, procs)), tuple(map(id, assigns)), tuple(kids))
@@ -1645,7 +1648,7 @@ def build_defs(design: dict, modules: list, rel=lambda p: p):
         if did is None:
             vs = variants.setdefault(mkey, [])
             did = ids[mkey] if not vs else "%s~%d" % (ids[mkey], len(vs) + 1)
-            vs.append((did, insts, kids, procs, assigns))
+            vs.append((did, insts, kids, procs, assigns, pvals))
             sigs[sig] = did
         busy.discard(esig)
         memo[esig] = did
@@ -1659,16 +1662,17 @@ def build_defs(design: dict, modules: list, rel=lambda p: p):
             elab(m, {}, 0)
     built = []
     for key, m in by_name.items():
-        for did, insts, kids, procs, assigns in variants.get(key, ()):
-            _rtl_def(design, m, did, insts, kids, procs, assigns, by_name, members, rel)
+        for did, insts, kids, procs, assigns, pvals in variants.get(key, ()):
+            _rtl_def(design, m, did, insts, kids, procs, assigns, pvals, by_name, members, rel)
             built.append(did)
     _finish_kinds(design, built)
     roots = [ids[k] for k in by_name if ids[k] not in instantiated]
     return ids, roots
 
 
-def _rtl_def(design, m, did, insts, kids, procs, assigns, by_name, members, rel):
-    """One rtl def from the kept instances (kids: their def ids), processes and assignments of m."""
+def _rtl_def(design, m, did, insts, kids, procs, assigns, pvals, by_name, members, rel):
+    """One rtl def from the kept instances (kids: their def ids, pvals: their evaluated generic
+    actuals), processes and assignments of m."""
     defs = design["defs"]
     d = M.new_def(m.name, "rtl", src={"file": rel(m.file), "line": m.line}, lang=m.lang)
     clocks = {p["clk"] for p in procs if p.get("clk")}
@@ -1695,7 +1699,7 @@ def _rtl_def(design, m, did, insts, kids, procs, assigns, by_name, members, rel)
     for x in mine:
         touch(x, ["", x])
     aliases = []
-    for inst, cid in zip(insts, kids):
+    for iv, (inst, cid) in enumerate(zip(insts, kids)):
         if inst["type"] in INTERFACES:
             iface.add(inst["name"])
             for port, expr in inst["conns"].items():  # interface ports: bram_if b(.clk(clk))
@@ -1725,6 +1729,19 @@ def _rtl_def(design, m, did, insts, kids, procs, assigns, by_name, members, rel)
         entry = {"name": inst["name"], "def": cid, "line": inst["line"]}
         if inst["params"]:
             entry["params"] = inst["params"]
+            pv = pvals[iv] if pvals else None
+            if pv:
+                gnames = [g for g, _ in callee.generics] if callee and callee.lang == "vhdl" else []
+                vals = {}
+                for k in inst["params"]:
+                    if k.startswith("#") and k[1:].isdigit() and int(k[1:]) < len(gnames):
+                        lk = gnames[int(k[1:])].lower()
+                    else:
+                        lk = k.lower()
+                    if pv.get(lk) is not None:
+                        vals[k] = pv[lk]
+                if vals:
+                    entry["pvals"] = vals
         d["insts"].append(entry)
         bbdef = defs.get(cid) if cid.startswith("bb:") else None
         for formal, expr in conns.items():
