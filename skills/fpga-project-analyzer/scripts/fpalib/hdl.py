@@ -1582,6 +1582,8 @@ def _h_display_params(inst, callee, actuals):
             out[key] = text
             continue
         value = actuals.get(formal.lower())
+        if isinstance(value, bool):  # keep VHDL's literals, not Python's True/False
+            value = "true" if value else "false"
         out[formal] = text if value is None else value
     return out
 
